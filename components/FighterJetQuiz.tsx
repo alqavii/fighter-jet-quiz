@@ -12,31 +12,63 @@ export default function FighterJetQuiz() {
   const [score, setScore] = useState({ correct: 0, total: 0 });
   const [flashDuration, setFlashDuration] = useState(500); // milliseconds
   const [isLoading, setIsLoading] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const imageLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Preload all images when component mounts
+  useEffect(() => {
+    fighterJets.forEach((jet) => {
+      const link = document.createElement('link');
+      link.rel = 'preload';
+      link.as = 'image';
+      link.href = jet.imagePath;
+      document.head.appendChild(link);
+    });
+
+    return () => {
+      // Cleanup preload links if needed
+      const preloadLinks = document.querySelectorAll('link[rel="preload"][as="image"]');
+      preloadLinks.forEach((link) => link.remove());
+    };
+  }, []);
 
   const startNewRound = () => {
     setIsLoading(true);
+    setImageLoaded(false);
     const randomJet = fighterJets[Math.floor(Math.random() * fighterJets.length)];
     setCurrentJet(randomJet);
     setSelectedAnswer('');
     setIsAnswered(false);
     setShowImage(false);
     
-    // Flash the image after a brief delay
-    setTimeout(() => {
-      setShowImage(true);
-      setIsLoading(false);
-      
-      // Hide the image after flashDuration
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      timeoutRef.current = setTimeout(() => {
-        setShowImage(false);
-      }, flashDuration);
-    }, 100);
+    // Clear any existing timeouts
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    if (imageLoadTimeoutRef.current) {
+      clearTimeout(imageLoadTimeoutRef.current);
+    }
   };
 
+  // Handle image load - wait for image to load before showing it
+  const handleImageLoad = () => {
+    setImageLoaded(true);
+    setIsLoading(false);
+    
+    // Show the image immediately after it loads
+    setShowImage(true);
+    
+    // Hide the image after flashDuration
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    timeoutRef.current = setTimeout(() => {
+      setShowImage(false);
+    }, flashDuration);
+  };
+
+  // Start new round on mount
   useEffect(() => {
     startNewRound();
     
@@ -44,12 +76,15 @@ export default function FighterJetQuiz() {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      if (imageLoadTimeoutRef.current) {
+        clearTimeout(imageLoadTimeoutRef.current);
+      }
     };
   }, []);
 
-  // Update flash duration when it changes
+  // Update flash duration when it changes (only if image is currently showing)
   useEffect(() => {
-    if (showImage && currentJet && !isAnswered) {
+    if (showImage && currentJet && !isAnswered && imageLoaded) {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
@@ -57,7 +92,25 @@ export default function FighterJetQuiz() {
         setShowImage(false);
       }, flashDuration);
     }
-  }, [flashDuration, showImage, currentJet, isAnswered]);
+  }, [flashDuration, showImage, currentJet, isAnswered, imageLoaded]);
+
+  // Fallback timeout in case image doesn't load (safety net)
+  useEffect(() => {
+    if (currentJet && !imageLoaded && !isAnswered) {
+      imageLoadTimeoutRef.current = setTimeout(() => {
+        // If image hasn't loaded after 3 seconds, show it anyway
+        if (!imageLoaded) {
+          handleImageLoad();
+        }
+      }, 3000);
+    }
+
+    return () => {
+      if (imageLoadTimeoutRef.current) {
+        clearTimeout(imageLoadTimeoutRef.current);
+      }
+    };
+  }, [currentJet, imageLoaded, isAnswered]);
 
   const handleAnswer = () => {
     if (!currentJet || !selectedAnswer) return;
@@ -125,6 +178,13 @@ export default function FighterJetQuiz() {
               height={400}
               className="object-contain"
               priority
+              onLoad={handleImageLoad}
+              onError={() => {
+                // Fallback if image fails to load
+                setImageLoaded(true);
+                setIsLoading(false);
+                setShowImage(true);
+              }}
             />
           </div>
         ) : currentJet && !isAnswered ? (
